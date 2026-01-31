@@ -21,8 +21,8 @@ const PongGame = (() => {
     const WINNING_SCORE = 7;
     const PADDLE_H = 80, PADDLE_W = 12;
     const BALL_SIZE = 8;
-    const PADDLE_SPEED = 5;
-    const BALL_BASE_SPEED = 5;
+    const PADDLE_SPEED = 4;
+    const BALL_BASE_SPEED = 3.2;
 
     // Q-Learning AI
     const Q = {};
@@ -139,7 +139,7 @@ const PongGame = (() => {
     function handleInput() {
         // Mouse / touch control
         const targetY = mouseY / scale - PADDLE_H / 2;
-        playerPaddle.y += (targetY - playerPaddle.y) * 0.15;
+        playerPaddle.y += (targetY - playerPaddle.y) * 0.25;
         playerPaddle.y = Math.max(0, Math.min(H - PADDLE_H, playerPaddle.y));
 
         // Keyboard fallback
@@ -178,9 +178,9 @@ const PongGame = (() => {
             ball.x + BALL_SIZE >= playerPaddle.x &&
             ball.y >= playerPaddle.y && ball.y <= playerPaddle.y + PADDLE_H &&
             ball.vx < 0) {
-            ball.vx = Math.abs(ball.vx) * 1.05;
+            ball.vx = Math.min(Math.abs(ball.vx) * 1.03, 7);
             const hitPos = (ball.y - playerPaddle.y) / PADDLE_H;
-            ball.vy = (hitPos - 0.5) * BALL_BASE_SPEED * 1.5;
+            ball.vy = (hitPos - 0.5) * BALL_BASE_SPEED * 1.3;
             ball.x = playerPaddle.x + PADDLE_W + BALL_SIZE;
             rallyCount++;
             AudioSystem.hit();
@@ -199,9 +199,9 @@ const PongGame = (() => {
             ball.x - BALL_SIZE <= aiPaddle.x + PADDLE_W &&
             ball.y >= aiPaddle.y && ball.y <= aiPaddle.y + PADDLE_H &&
             ball.vx > 0) {
-            ball.vx = -Math.abs(ball.vx) * 1.05;
+            ball.vx = -Math.min(Math.abs(ball.vx) * 1.03, 7);
             const hitPos = (ball.y - aiPaddle.y) / PADDLE_H;
-            ball.vy = (hitPos - 0.5) * BALL_BASE_SPEED * 1.5;
+            ball.vy = (hitPos - 0.5) * BALL_BASE_SPEED * 1.3;
             ball.x = aiPaddle.x - BALL_SIZE;
             rallyCount++;
             AudioSystem.hit();
@@ -277,6 +277,12 @@ const PongGame = (() => {
         ctx.fillStyle = '#0a0a12';
         ctx.fillRect(0, 0, W, H);
 
+        // When game is over, just draw a clean dark canvas (overlay handles the rest)
+        if (gameOver) {
+            particles.draw();
+            return;
+        }
+
         // Center line
         ctx.setLineDash([8, 8]);
         ctx.strokeStyle = 'rgba(255,255,255,0.08)';
@@ -287,15 +293,13 @@ const PongGame = (() => {
         ctx.stroke();
         ctx.setLineDash([]);
 
-        // Score (hide when game over to avoid overlap with end screen)
-        if (!gameOver) {
-            ctx.font = '48px Orbitron';
-            ctx.textAlign = 'center';
-            ctx.fillStyle = 'rgba(0, 240, 255, 0.3)';
-            ctx.fillText(playerScore, W / 2 - 80, 60);
-            ctx.fillStyle = 'rgba(255, 0, 110, 0.3)';
-            ctx.fillText(aiScore, W / 2 + 80, 60);
-        }
+        // Score
+        ctx.font = '48px Orbitron';
+        ctx.textAlign = 'center';
+        ctx.fillStyle = 'rgba(0, 240, 255, 0.3)';
+        ctx.fillText(playerScore, W / 2 - 80, 60);
+        ctx.fillStyle = 'rgba(255, 0, 110, 0.3)';
+        ctx.fillText(aiScore, W / 2 + 80, 60);
 
         // Ball trail
         for (let i = 0; i < ball.trail.length; i++) {
@@ -331,7 +335,7 @@ const PongGame = (() => {
         ctx.shadowBlur = 0;
 
         // Rally counter
-        if (rallyCount > 2 && !gameOver) {
+        if (rallyCount > 2) {
             ctx.font = '14px Share Tech Mono';
             ctx.textAlign = 'center';
             ctx.fillStyle = `rgba(255, 230, 0, ${Math.min(1, rallyCount / 10)})`;

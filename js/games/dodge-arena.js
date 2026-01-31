@@ -346,6 +346,11 @@ const DodgeArenaGame = (() => {
         ctx.fillStyle = '#0a0a12';
         ctx.fillRect(0, 0, W, H);
 
+        if (gameOver && document.getElementById('game-ui-overlay').querySelector('.game-start-overlay')) {
+            particles.draw();
+            return;
+        }
+
         // Grid lines
         ctx.strokeStyle = 'rgba(255,255,255,0.03)';
         ctx.lineWidth = 1;

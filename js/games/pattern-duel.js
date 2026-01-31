@@ -261,6 +261,12 @@ const PatternDuelGame = (() => {
         ctx.fillStyle = '#0a0a12';
         ctx.fillRect(0, 0, W, H);
 
+        if (gameOver && document.getElementById('game-ui-overlay').querySelector('.game-start-overlay')) {
+            particles.update();
+            particles.draw();
+            return;
+        }
+
         // Title + round
         ctx.font = '14px Share Tech Mono';
         ctx.textAlign = 'center';

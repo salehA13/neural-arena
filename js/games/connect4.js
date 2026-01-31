@@ -348,6 +348,13 @@ const Connect4Game = (() => {
         ctx.fillStyle = '#0a0a12';
         ctx.fillRect(0, 0, W, H);
 
+        // When game is over with end screen showing, clear canvas
+        if (gameOver && document.getElementById('game-ui-overlay').querySelector('.game-start-overlay')) {
+            particles.update();
+            particles.draw();
+            return;
+        }
+
         // Board background
         ctx.fillStyle = '#111128';
         ctx.beginPath();
