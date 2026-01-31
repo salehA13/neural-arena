@@ -14,7 +14,7 @@ const Connect4Game = (() => {
     const COLS = 7, ROWS = 6;
     const CELL = 64;
     const W = COLS * CELL + 40;
-    const H = ROWS * CELL + 100;
+    const H = ROWS * CELL + 110;
     const PAD_X = 20, PAD_Y = 60;
 
     let board; // 0=empty, 1=player, 2=AI
@@ -409,7 +409,15 @@ const Connect4Game = (() => {
             ctx.shadowBlur = 0;
         }
 
-        // Move evaluation display
+        // Thinking text (above eval row)
+        if (thinkingText && !gameOver) {
+            ctx.font = '11px Share Tech Mono';
+            ctx.textAlign = 'center';
+            ctx.fillStyle = '#ffe600';
+            ctx.fillText(thinkingText, W / 2, H - 28);
+        }
+
+        // Move evaluation display (bottom row)
         if (moveEvals.length > 0 && !gameOver) {
             ctx.font = '11px Share Tech Mono';
             ctx.textAlign = 'center';
@@ -418,17 +426,9 @@ const Connect4Game = (() => {
                     const cx = PAD_X + c * CELL + CELL / 2;
                     const val = Math.round(moveEvals[c]);
                     ctx.fillStyle = val > 0 ? '#39ff14' : (val < 0 ? '#ff006e' : '#555');
-                    ctx.fillText(val > 0 ? `+${val}` : `${val}`, cx, H - 8);
+                    ctx.fillText(val > 0 ? `+${val}` : `${val}`, cx, H - 10);
                 }
             }
-        }
-
-        // Thinking text
-        if (thinkingText && !gameOver) {
-            ctx.font = '12px Share Tech Mono';
-            ctx.textAlign = 'center';
-            ctx.fillStyle = '#ffe600';
-            ctx.fillText(thinkingText, W / 2, H - 25);
         }
 
         particles.update();

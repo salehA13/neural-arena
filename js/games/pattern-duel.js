@@ -338,39 +338,39 @@ const PatternDuelGame = (() => {
             ctx.fillText('Choose your element', W / 2, 200);
         }
 
-        // Choice history (last 10)
+        // Choice history (last 10) — positioned above button area
         const histStart = Math.max(0, playerHistory.length - 10);
         ctx.font = '10px Share Tech Mono';
         ctx.fillStyle = '#555570';
         ctx.textAlign = 'center';
-        ctx.fillText('HISTORY', W / 2, 330);
+        ctx.fillText('HISTORY', W / 2, 320);
         for (let i = histStart; i < playerHistory.length; i++) {
             const idx = i - histStart;
             const x = W / 2 - (Math.min(playerHistory.length, 10) - 1) * 18 + idx * 36;
             const r = resultHistory[i];
             ctx.font = '18px serif';
             ctx.globalAlpha = 0.3 + (idx / 10) * 0.7;
-            ctx.fillText(SYMBOLS[playerHistory[i]].icon, x - 8, 358);
-            ctx.fillText(SYMBOLS[aiHistory[i]].icon, x + 8, 375);
+            ctx.fillText(SYMBOLS[playerHistory[i]].icon, x - 8, 348);
+            ctx.fillText(SYMBOLS[aiHistory[i]].icon, x + 8, 365);
             // Result dot
             ctx.fillStyle = r === 'win' ? '#00f0ff' : (r === 'loss' ? '#ff006e' : '#ffe600');
             ctx.beginPath();
-            ctx.arc(x, 385, 3, 0, Math.PI * 2);
+            ctx.arc(x, 375, 3, 0, Math.PI * 2);
             ctx.fill();
         }
         ctx.globalAlpha = 1;
 
-        // Streak indicator
+        // Streak indicator — above the button bar
         if (streaks.player >= 3) {
             ctx.font = '12px Share Tech Mono';
             ctx.fillStyle = '#00f0ff';
             ctx.textAlign = 'center';
-            ctx.fillText(`🔥 ${streaks.player} win streak!`, W / 2, H - 20);
+            ctx.fillText(`🔥 ${streaks.player} win streak!`, W / 2, H - 100);
         } else if (streaks.ai >= 3) {
             ctx.font = '12px Share Tech Mono';
             ctx.fillStyle = '#ff006e';
             ctx.textAlign = 'center';
-            ctx.fillText(`🧠 AI on ${streaks.ai} win streak`, W / 2, H - 20);
+            ctx.fillText(`🧠 AI on ${streaks.ai} win streak`, W / 2, H - 100);
         }
 
         particles.update();

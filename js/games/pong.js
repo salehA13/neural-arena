@@ -287,13 +287,15 @@ const PongGame = (() => {
         ctx.stroke();
         ctx.setLineDash([]);
 
-        // Score
-        ctx.font = '48px Orbitron';
-        ctx.textAlign = 'center';
-        ctx.fillStyle = 'rgba(0, 240, 255, 0.3)';
-        ctx.fillText(playerScore, W / 2 - 80, 60);
-        ctx.fillStyle = 'rgba(255, 0, 110, 0.3)';
-        ctx.fillText(aiScore, W / 2 + 80, 60);
+        // Score (hide when game over to avoid overlap with end screen)
+        if (!gameOver) {
+            ctx.font = '48px Orbitron';
+            ctx.textAlign = 'center';
+            ctx.fillStyle = 'rgba(0, 240, 255, 0.3)';
+            ctx.fillText(playerScore, W / 2 - 80, 60);
+            ctx.fillStyle = 'rgba(255, 0, 110, 0.3)';
+            ctx.fillText(aiScore, W / 2 + 80, 60);
+        }
 
         // Ball trail
         for (let i = 0; i < ball.trail.length; i++) {
@@ -329,7 +331,7 @@ const PongGame = (() => {
         ctx.shadowBlur = 0;
 
         // Rally counter
-        if (rallyCount > 2) {
+        if (rallyCount > 2 && !gameOver) {
             ctx.font = '14px Share Tech Mono';
             ctx.textAlign = 'center';
             ctx.fillStyle = `rgba(255, 230, 0, ${Math.min(1, rallyCount / 10)})`;
