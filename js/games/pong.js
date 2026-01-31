@@ -80,11 +80,28 @@ const PongGame = (() => {
     function aiDecide() {
         const state = discretize(ball.x, ball.y, ball.vx, ball.vy, aiPaddle.y);
         let action;
-        if (Math.random() < epsilon) {
+
+        // Baseline: track the ball (so AI always looks alive)
+        const aiCenter = aiPaddle.y + PADDLE_H / 2;
+        const ballTarget = ball.y + ball.vy * 3; // predict a few frames ahead
+        let baselineAction = 0;
+        if (ballTarget < aiCenter - 15) baselineAction = -1;
+        else if (ballTarget > aiCenter + 15) baselineAction = 1;
+
+        // Q-learning override: as AI learns, it uses Q-table more
+        const qStates = Object.keys(Q).length;
+        const useQLearning = qStates > 20 && Math.random() > epsilon;
+
+        if (useQLearning) {
+            action = bestAction(state);
+        } else if (Math.random() < epsilon * 0.3) {
+            // Small random exploration
             action = [-1, 0, 1][Math.floor(Math.random() * 3)];
         } else {
-            action = bestAction(state);
+            // Default to ball tracking (keeps AI visually responsive)
+            action = baselineAction;
         }
+
         lastState = state;
         lastAction = action;
         return action;
@@ -137,7 +154,7 @@ const PongGame = (() => {
 
         // AI movement using Q-learning
         const action = aiDecide();
-        aiPaddle.y += action * (PADDLE_SPEED - 0.5 + Math.min(rallyCount * 0.1, 1.5));
+        aiPaddle.y += action * (PADDLE_SPEED + Math.min(rallyCount * 0.15, 2));
         aiPaddle.y = Math.max(0, Math.min(H - PADDLE_H, aiPaddle.y));
 
         // Ball trail
