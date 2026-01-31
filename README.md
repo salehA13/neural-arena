@@ -1,32 +1,71 @@
 # 🧠 Neural Arena
 
-**[▶ Play Now](https://saleha13.github.io/neural-arena/)**
+**The AI that learns *you*.**
 
-An AI game arena where the opponent learns your play style in real-time and adapts its strategy. 5 mini-games, one adaptive AI that builds a behavioral profile of you as you play.
+A collection of 5 browser-based mini-games where every AI opponent genuinely adapts to your play style in real-time. No pre-programmed difficulty levels — the AI studies your patterns and evolves its strategy.
 
-## Games
+### [▶️ Play Now](https://saleha13.github.io/neural-arena)
+
+---
+
+## 🎮 Games
 
 | Game | AI Technique | What It Learns |
 |------|-------------|----------------|
-| **Pong** | Q-learning | Your paddle positioning, aim patterns, reaction speed |
-| **Connect 4** | Minimax + adaptive heuristics | Your opening preferences, column tendencies |
-| **Pattern Duel** | Markov chain prediction | Your choice sequences, predicts your next move |
-| **Dodge Arena** | Movement pattern tracking | Your dodge direction bias, reaction patterns |
-| **Memory Match** | Recall pattern analysis | What you remember, adapts card placement |
+| 🏓 **Neural Pong** | Q-Learning | Your paddle positioning and aim tendencies |
+| 🔴 **Connect 4** | Minimax + Adaptive Heuristics | Your opening moves and column preferences |
+| 🔮 **Pattern Duel** | Markov Chain Prediction | Sequences in your element choices |
+| 💥 **Dodge Arena** | Movement Heatmap Tracking | Where you hide and how you dodge |
+| 🧠 **Memory Match** | Recall Modeling | Which symbols/positions you struggle with |
 
-## How It Works
+## 🤖 How the AI Adapts
 
-Each game tracks your behavior and feeds it into a unified Player Profile. The AI starts average and gets harder as it learns your patterns. You can see what the AI has detected about you in the insights panel during gameplay and in the Player Profile dashboard.
+Each game uses a different machine learning technique:
 
-**AI techniques used:**
-- Q-learning with state-action value tables (Pong)
-- Minimax with alpha-beta pruning and learned position weights (Connect 4)
-- Markov chain sequence prediction (Pattern Duel)
-- Movement heatmap tracking with predictive targeting (Dodge Arena)
-- Recall probability modeling (Memory Match)
+- **Q-Learning (Pong):** The AI builds a Q-table mapping game states to optimal actions, updating rewards when it scores or gets scored on.
+- **Minimax + Adaptation (Connect 4):** Classic minimax with alpha-beta pruning, but the evaluation heuristic shifts based on your opening patterns across games.
+- **Markov Chains (Pattern Duel):** Builds 1-gram through 4-gram transition matrices from your choice history, predicting your next move with increasing accuracy.
+- **Heatmap Tracking (Dodge Arena):** Records your position every frame into a spatial grid. Projectiles increasingly target your comfort zones and predicted dodge direction.
+- **Recall Modeling (Memory Match):** Tracks your success rate per card position and symbol, then places harder symbols where you have poor recall.
 
-## Tech
+## 📊 Player Profile
 
-Pure HTML/CSS/JavaScript. No frameworks, no build tools, no server. Everything runs client-side. Player profile persists in localStorage.
+Your cross-game profile tracks:
+- Total games played and win rates
+- AI adaptation level (how much data the AI has on you)
+- Detected behavioral patterns
+- AI win rate trends over time
 
-Built with Web Audio API for synth sound effects and Canvas for rendering.
+All data stored locally in `localStorage` — nothing leaves your browser.
+
+## 🛠️ Tech Stack
+
+- **Pure vanilla JS** — zero dependencies, zero build step
+- **Canvas API** — all rendering
+- **Web Audio API** — procedurally generated sound effects
+- **localStorage** — persistent player profiles
+
+Just open `index.html` and play.
+
+## 📁 Project Structure
+
+```
+neural-arena/
+├── index.html
+├── css/style.css
+├── js/
+│   ├── app.js          # Main controller, screen management
+│   ├── audio.js         # Procedural sound synthesis
+│   ├── particles.js     # Particle effects + background animation
+│   ├── profile.js       # Player profile & localStorage persistence
+│   └── games/
+│       ├── pong.js          # Q-learning pong
+│       ├── connect4.js      # Adaptive minimax Connect 4
+│       ├── pattern-duel.js  # Markov chain prediction game
+│       ├── dodge-arena.js   # Heatmap-tracking dodge game
+│       └── memory-match.js  # Adaptive memory card game
+```
+
+## License
+
+MIT

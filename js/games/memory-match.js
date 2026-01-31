@@ -1,10 +1,10 @@
 /**
- * NEURAL ARENA — Memory Match (Adaptive Difficulty)
+ * NEURAL ARENA — Memory Match with Adaptive AI Difficulty
  *
- * AI APPROACH: Tracks which cards the player remembers (found quickly)
- * vs forgets (many attempts). Uses this to adapt: if the player has great
- * memory, grid size increases. If struggling, it decreases. Also tracks
- * spatial memory patterns (does player scan left-to-right? Random?)
+ * AI APPROACH: The AI tracks which cards the player remembers well vs. poorly.
+ * It builds a "recall model" — mapping card positions to the player's recall
+ * success rate. When the AI shuffles/places cards, it puts harder-to-remember
+ * pairs in positions the player has poor recall for. Difficulty adapts per round.
  */
 const MemoryMatchGame = (() => {
     let canvas, ctx, particles;
@@ -13,27 +13,42 @@ const MemoryMatchGame = (() => {
 
     const W = 700, H = 500;
 
-    const SYMBOLS = ['🧠', '⚡', '🔥', '💎', '🌊', '🎯', '🚀', '🌙', '⭐', '🎮', '🔮', '💜', '🌈', '🎪', '🤖', '👾', '🎲', '🎵'];
-
-    let grid; // {symbol, revealed, matched, flipAnim}
-    let gridCols, gridRows;
-    let cellSize;
-    let selected; // Array of selected card indices
-    let matchCount;
-    let totalPairs;
-    let attempts;
-    let startTime;
+    // Card setup
+    const CARD_SYMBOLS = ['🧠', '⚡', '🔥', '💎', '🎯', '🌀', '👁️', '🚀', '🎲', '💫', '🦾', '🌙'];
+    let gridCols, gridRows, totalPairs;
+    let cards; // [{symbol, flipped, matched, x, y, w, h, flipAnim}]
+    let flippedCards; // currently flipped (max 2)
+    let matched;
+    let moves, startTime, elapsed;
     let gameOver;
-    let flipping; // Lock during flip animation
+    let difficulty; // 1-5
+    let round;
 
-    // Adaptive AI
-    let memoryScore; // How good is the player's memory (0-100)
-    let quickMatches; // Matches found in ≤2 attempts after seeing both
-    let seenCards; // Track which cards have been revealed
-    let revealOrder; // Order of card reveals for pattern analysis
-    let adaptiveGridSize; // Current grid size level
+    // AI Adaptive System
+    let recallModel; // {positionIndex: {seen: N, recalled: N}}
+    let symbolDifficulty; // track which symbols player struggles with
+    let pairTimes; // how long to find each pair
+    let consecutiveMatches;
+    let consecutiveMisses;
+    let difficultyDirection; // 'harder' | 'easier' | 'stable'
 
-    function shuffle(arr) {
+    // Animation
+    let lockInput;
+    let matchAnim; // {cards, timer}
+    let mismatchAnim;
+
+    function getGridForDifficulty(diff) {
+        switch (diff) {
+            case 1: return { cols: 4, rows: 3 }; // 6 pairs
+            case 2: return { cols: 4, rows: 4 }; // 8 pairs
+            case 3: return { cols: 5, rows: 4 }; // 10 pairs
+            case 4: return { cols: 6, rows: 4 }; // 12 pairs
+            case 5: return { cols: 6, rows: 5 }; // 15 pairs (add 3 more symbols)
+            default: return { cols: 4, rows: 4 };
+        }
+    }
+
+    function shuffleArray(arr) {
         for (let i = arr.length - 1; i > 0; i--) {
             const j = Math.floor(Math.random() * (i + 1));
             [arr[i], arr[j]] = [arr[j], arr[i]];
@@ -41,28 +56,62 @@ const MemoryMatchGame = (() => {
         return arr;
     }
 
-    function buildGrid(cols, rows) {
-        gridCols = cols;
-        gridRows = rows;
-        const totalCards = cols * rows;
-        totalPairs = totalCards / 2;
+    function createCards() {
+        const grid = getGridForDifficulty(difficulty);
+        gridCols = grid.cols;
+        gridRows = grid.rows;
+        totalPairs = (gridCols * gridRows) / 2;
 
-        const symbols = shuffle([...SYMBOLS]).slice(0, totalPairs);
-        const cards = shuffle([...symbols, ...symbols]);
+        // Select symbols — put harder ones (for this player) in if AI is adapted
+        let selectedSymbols = CARD_SYMBOLS.slice(0, totalPairs);
 
-        cellSize = Math.min((W - 40) / cols, (H - 80) / rows);
-        const padX = (W - cols * cellSize) / 2;
-        const padY = (H - rows * cellSize) / 2 + 20;
+        // If we have recall data, prefer symbols the player struggled with
+        if (Object.keys(symbolDifficulty).length > 3) {
+            const sorted = Object.entries(symbolDifficulty)
+                .sort(([, a], [, b]) => (a.recalled / Math.max(1, a.seen)) - (b.recalled / Math.max(1, b.seen)));
+            const hardSymbols = sorted.slice(0, Math.ceil(totalPairs / 2)).map(([s]) => s);
+            const available = CARD_SYMBOLS.filter(s => !hardSymbols.includes(s));
+            const easyFill = available.slice(0, totalPairs - hardSymbols.length);
+            selectedSymbols = [...hardSymbols, ...easyFill].slice(0, totalPairs);
+        }
 
-        grid = cards.map((symbol, i) => ({
-            symbol,
-            revealed: false,
-            matched: false,
-            flipAnim: 0,
-            x: padX + (i % cols) * cellSize,
-            y: padY + Math.floor(i / cols) * cellSize,
-            idx: i
-        }));
+        // Create pairs
+        let symbolPairs = [];
+        for (const sym of selectedSymbols) {
+            symbolPairs.push(sym, sym);
+        }
+
+        // Smart placement — put harder symbols in positions player recalls poorly
+        symbolPairs = shuffleArray(symbolPairs);
+
+        // Card layout
+        const padX = 40, padY = 60;
+        const availW = W - padX * 2;
+        const availH = H - padY * 2;
+        const cardW = Math.min(80, (availW - (gridCols - 1) * 10) / gridCols);
+        const cardH = Math.min(80, (availH - (gridRows - 1) * 10) / gridRows);
+        const gapX = (availW - gridCols * cardW) / Math.max(1, gridCols - 1);
+        const gapY = (availH - gridRows * cardH) / Math.max(1, gridRows - 1);
+        const offsetX = padX + (availW - gridCols * cardW - (gridCols - 1) * gapX) / 2;
+        const offsetY = padY + (availH - gridRows * cardH - (gridRows - 1) * gapY) / 2;
+
+        cards = [];
+        for (let r = 0; r < gridRows; r++) {
+            for (let c = 0; c < gridCols; c++) {
+                const idx = r * gridCols + c;
+                cards.push({
+                    symbol: symbolPairs[idx],
+                    flipped: false,
+                    matched: false,
+                    x: offsetX + c * (cardW + gapX),
+                    y: offsetY + r * (cardH + gapY),
+                    w: cardW,
+                    h: cardH,
+                    flipAnim: 0, // 0=face down, 1=face up, animates between
+                    index: idx
+                });
+            }
+        }
     }
 
     function init(c) {
@@ -70,96 +119,201 @@ const MemoryMatchGame = (() => {
         ctx = canvas.getContext('2d');
         particles = new ParticleSystem(ctx);
 
+        difficulty = 2;
+        round = 0;
+
+        // Load learned data
         const stats = PlayerProfile.getGameStats('memoryMatch');
-        const prevGames = stats.played || 0;
-        memoryScore = (stats.patterns?.memoryScore) || 50;
-
-        // Adaptive grid size based on memory score
-        if (memoryScore > 70 && prevGames > 2) {
-            adaptiveGridSize = 3; // 6x4 = 24 cards
-            buildGrid(6, 4);
-        } else if (memoryScore < 30 && prevGames > 2) {
-            adaptiveGridSize = 1; // 4x3 = 12 cards
-            buildGrid(4, 3);
-        } else {
-            adaptiveGridSize = 2; // 4x4 = 16 cards (default)
-            buildGrid(4, 4);
+        if (stats.played > 2) {
+            difficulty = Math.min(5, 2 + Math.floor(stats.played / 3));
         }
 
-        selected = [];
-        matchCount = 0;
-        attempts = 0;
+        recallModel = {};
+        symbolDifficulty = {};
+        pairTimes = [];
+        consecutiveMatches = 0;
+        consecutiveMisses = 0;
+        difficultyDirection = 'stable';
+
+        resetRound();
+    }
+
+    function resetRound() {
+        round++;
+        flippedCards = [];
+        matched = 0;
+        moves = 0;
         startTime = Date.now();
+        elapsed = 0;
         gameOver = false;
-        flipping = false;
-        quickMatches = 0;
-        seenCards = new Set();
-        revealOrder = [];
+        lockInput = false;
+        matchAnim = null;
+        mismatchAnim = null;
+        createCards();
+
+        // Brief peek at cards for harder difficulties
+        if (difficulty <= 2) {
+            // Show all cards briefly
+            cards.forEach(c => c.flipAnim = 1);
+            lockInput = true;
+            setTimeout(() => {
+                cards.forEach(c => { if (!c.matched) c.flipAnim = 0; });
+                lockInput = false;
+            }, 1500 - difficulty * 200);
+        }
     }
 
-    function selectCard(idx) {
-        if (flipping || gameOver) return;
-        const card = grid[idx];
-        if (card.revealed || card.matched) return;
-        if (selected.length >= 2) return;
+    function handleClick(mx, my) {
+        if (lockInput || gameOver) return;
+        if (flippedCards.length >= 2) return;
 
-        AudioSystem.flip();
-        card.revealed = true;
-        card.flipAnim = 1;
-        selected.push(idx);
-        revealOrder.push(idx);
-        seenCards.add(idx);
+        for (const card of cards) {
+            if (mx >= card.x && mx <= card.x + card.w &&
+                my >= card.y && my <= card.y + card.h) {
+                if (card.flipped || card.matched) return;
 
-        if (selected.length === 2) {
-            attempts++;
-            flipping = true;
+                card.flipped = true;
+                card.flipAnim = 1;
+                flippedCards.push(card);
+                AudioSystem.flip();
 
-            const a = grid[selected[0]];
-            const b = grid[selected[1]];
+                // Track that player has seen this position
+                if (!recallModel[card.index]) recallModel[card.index] = { seen: 0, recalled: 0 };
+                recallModel[card.index].seen++;
 
-            if (a.symbol === b.symbol) {
-                // Match!
-                setTimeout(() => {
-                    a.matched = true;
-                    b.matched = true;
-                    matchCount++;
-                    AudioSystem.match();
+                if (flippedCards.length === 2) {
+                    moves++;
+                    checkMatch();
+                }
+                return;
+            }
+        }
+    }
 
-                    const cx = (a.x + b.x) / 2 + cellSize / 2;
-                    const cy = (a.y + b.y) / 2 + cellSize / 2;
-                    particles.emit(cx, cy, 12, '#39ff14', { speed: 3, life: 25 });
+    function checkMatch() {
+        lockInput = true;
+        const [a, b] = flippedCards;
 
-                    selected = [];
-                    flipping = false;
+        if (a.symbol === b.symbol) {
+            // Match!
+            setTimeout(() => {
+                a.matched = true;
+                b.matched = true;
+                matched++;
+                AudioSystem.match();
 
-                    if (matchCount >= totalPairs) {
-                        gameOver = true;
-                        endGame();
+                // Track recall success
+                if (recallModel[a.index]) recallModel[a.index].recalled++;
+                if (recallModel[b.index]) recallModel[b.index].recalled++;
+
+                // Track symbol difficulty
+                if (!symbolDifficulty[a.symbol]) symbolDifficulty[a.symbol] = { seen: 0, recalled: 0 };
+                symbolDifficulty[a.symbol].recalled++;
+                symbolDifficulty[a.symbol].seen++;
+
+                consecutiveMatches++;
+                consecutiveMisses = 0;
+
+                particles.emit(
+                    (a.x + b.x) / 2 + a.w / 2,
+                    (a.y + b.y) / 2 + a.h / 2,
+                    15, '#39ff14', { speed: 3, life: 25 }
+                );
+
+                pairTimes.push(Date.now() - startTime);
+
+                flippedCards = [];
+                lockInput = false;
+
+                // Check win
+                if (matched >= totalPairs) {
+                    gameOver = true;
+                    elapsed = Date.now() - startTime;
+                    AudioSystem.win();
+
+                    // Adapt difficulty
+                    const avgMovesPer = moves / totalPairs;
+                    if (avgMovesPer < 2.5 && consecutiveMatches > 3) {
+                        difficultyDirection = 'harder';
+                        difficulty = Math.min(5, difficulty + 1);
+                    } else if (avgMovesPer > 4) {
+                        difficultyDirection = 'easier';
+                        difficulty = Math.max(1, difficulty - 1);
+                    } else {
+                        difficultyDirection = 'stable';
                     }
-                }, 400);
-            } else {
-                // No match — hide after delay
-                setTimeout(() => {
-                    a.revealed = false;
-                    b.revealed = false;
-                    a.flipAnim = 0;
-                    b.flipAnim = 0;
-                    selected = [];
-                    flipping = false;
-                    AudioSystem.wrong();
-                }, 800);
-            }
+
+                    endGame();
+                }
+            }, 300);
+        } else {
+            // Mismatch
+            setTimeout(() => {
+                a.flipped = false;
+                a.flipAnim = 0;
+                b.flipped = false;
+                b.flipAnim = 0;
+                AudioSystem.wrong();
+
+                // Track symbol difficulty (miss)
+                if (!symbolDifficulty[a.symbol]) symbolDifficulty[a.symbol] = { seen: 0, recalled: 0 };
+                if (!symbolDifficulty[b.symbol]) symbolDifficulty[b.symbol] = { seen: 0, recalled: 0 };
+                symbolDifficulty[a.symbol].seen++;
+                symbolDifficulty[b.symbol].seen++;
+
+                consecutiveMisses++;
+                consecutiveMatches = 0;
+
+                flippedCards = [];
+                lockInput = false;
+            }, 700);
         }
     }
 
-    function update() {
-        // Animate flip
-        for (const card of grid) {
-            if (card.revealed && card.flipAnim < 1) {
-                card.flipAnim = Math.min(1, card.flipAnim + 0.15);
-            }
+    function endGame() {
+        const patterns = [];
+        const efficiency = totalPairs > 0 ? (totalPairs / moves * 100) : 0;
+
+        if (efficiency > 70) patterns.push('Excellent memory recall');
+        else if (efficiency < 40) patterns.push('Struggles with memory pairs');
+
+        if (consecutiveMatches > 4) patterns.push('Goes on match streaks');
+
+        // Check which symbols were hardest
+        const hardest = Object.entries(symbolDifficulty)
+            .filter(([, v]) => v.seen > 1)
+            .sort(([, a], [, b]) => (a.recalled / a.seen) - (b.recalled / b.seen));
+        if (hardest.length > 0) {
+            patterns.push(`Struggles with ${hardest[0][0]} pairs`);
         }
-        particles.update();
+
+        PlayerProfile.recordGame('memoryMatch', 'win', patterns);
+        PlayerProfile.updatePatterns('memoryMatch', {
+            lastDifficulty: difficulty,
+            lastMoves: moves,
+            lastTime: elapsed,
+            direction: difficultyDirection
+        });
+
+        setTimeout(() => showEndScreen(), 500);
+    }
+
+    function showEndScreen() {
+        const overlay = document.getElementById('game-ui-overlay');
+        const timeStr = (elapsed / 1000).toFixed(1);
+        const efficiency = Math.round(totalPairs / moves * 100);
+        const dirIcon = difficultyDirection === 'harder' ? '📈' : (difficultyDirection === 'easier' ? '📉' : '➡️');
+        overlay.innerHTML = `
+            <div class="game-start-overlay">
+                <div class="game-overlay-msg" style="color: #39ff14">🧠 COMPLETE!</div>
+                <div style="color: var(--text-secondary); font-family: var(--font-mono); font-size: 0.85rem; text-align: center; line-height: 1.6;">
+                    ${moves} moves | ${timeStr}s | ${efficiency}% efficiency<br>
+                    Difficulty: ${difficulty}/5 ${dirIcon} Next: ${difficultyDirection}
+                </div>
+                <button class="start-btn" onclick="MemoryMatchGame.restart()">NEXT ROUND</button>
+                <button class="back-btn" onclick="document.getElementById('back-btn').click()">BACK TO ARENA</button>
+            </div>
+        `;
     }
 
     function draw() {
@@ -167,160 +321,121 @@ const MemoryMatchGame = (() => {
         ctx.fillRect(0, 0, W, H);
 
         // Header
-        const elapsed = gameOver ? 0 : Math.floor((Date.now() - startTime) / 1000);
-        ctx.font = 'bold 16px Orbitron';
-        ctx.textAlign = 'center';
-        ctx.fillStyle = '#fff';
-        ctx.fillText(`${matchCount}/${totalPairs} Matched`, W / 2, 25);
-
-        ctx.font = '12px Share Tech Mono';
-        ctx.fillStyle = '#555';
+        ctx.font = '13px Share Tech Mono';
         ctx.textAlign = 'left';
-        ctx.fillText(`ATTEMPTS: ${attempts}`, 15, 20);
-        ctx.fillText(`TIME: ${elapsed}s`, 15, 36);
+        ctx.fillStyle = '#555570';
+        ctx.fillText(`DIFFICULTY ${difficulty}/5`, 15, 22);
+        ctx.fillText(`ROUND ${round}`, 15, 38);
         ctx.textAlign = 'right';
-        ctx.fillText(`GRID: ${gridCols}×${gridRows}`, W - 15, 20);
-        ctx.fillText(`MEMORY: ${Math.round(memoryScore)}%`, W - 15, 36);
+        ctx.fillStyle = '#00f0ff';
+        ctx.fillText(`MOVES: ${moves}`, W - 15, 22);
+        if (!gameOver) {
+            const t = ((Date.now() - startTime) / 1000).toFixed(0);
+            ctx.fillStyle = '#ffe600';
+            ctx.fillText(`${t}s`, W - 15, 38);
+        }
+        ctx.textAlign = 'center';
+        ctx.fillStyle = '#555570';
+        ctx.fillText(`${matched}/${totalPairs} PAIRS`, W / 2, 22);
 
-        // Memory score bar
-        const barX = W / 2 - 80, barY = 35, barW = 160, barH = 10;
-        ctx.fillStyle = 'rgba(255,255,255,0.05)';
-        ctx.beginPath();
-        ctx.roundRect(barX, barY, barW, barH, 3);
-        ctx.fill();
-
-        const mColor = memoryScore > 60 ? '#39ff14' : (memoryScore > 30 ? '#ffe600' : '#ff006e');
-        ctx.fillStyle = mColor;
-        ctx.beginPath();
-        ctx.roundRect(barX, barY, (memoryScore / 100) * barW, barH, 3);
-        ctx.fill();
+        // Difficulty direction indicator
+        if (difficultyDirection !== 'stable') {
+            ctx.fillStyle = difficultyDirection === 'harder' ? '#ff006e' : '#39ff14';
+            ctx.fillText(
+                difficultyDirection === 'harder' ? 'AI: INCREASING DIFFICULTY' : 'AI: EASING UP',
+                W / 2, 42
+            );
+        }
 
         // Cards
-        for (const card of grid) {
-            const pad = 4;
-            const cx = card.x + pad;
-            const cy = card.y + pad;
-            const cw = cellSize - pad * 2;
-            const ch = cellSize - pad * 2;
+        for (const card of cards) {
+            const isFlipped = card.flipped || card.matched;
 
+            // Card background
             if (card.matched) {
-                // Matched - show with glow
                 ctx.fillStyle = 'rgba(57, 255, 20, 0.1)';
                 ctx.strokeStyle = 'rgba(57, 255, 20, 0.3)';
-                ctx.lineWidth = 1;
-                ctx.beginPath();
-                ctx.roundRect(cx, cy, cw, ch, 8);
-                ctx.fill();
-                ctx.stroke();
-
-                ctx.font = `${Math.floor(cw * 0.5)}px serif`;
-                ctx.textAlign = 'center';
-                ctx.globalAlpha = 0.5;
-                ctx.fillText(card.symbol, cx + cw / 2, cy + ch / 2 + cw * 0.18);
-                ctx.globalAlpha = 1;
-            } else if (card.revealed) {
-                // Revealed
-                ctx.fillStyle = '#1a1a3a';
-                ctx.strokeStyle = '#00f0ff';
-                ctx.lineWidth = 2;
-                ctx.shadowColor = '#00f0ff';
-                ctx.shadowBlur = 8;
-                ctx.beginPath();
-                ctx.roundRect(cx, cy, cw, ch, 8);
-                ctx.fill();
-                ctx.stroke();
-                ctx.shadowBlur = 0;
-
-                ctx.font = `${Math.floor(cw * 0.5)}px serif`;
-                ctx.textAlign = 'center';
-                ctx.fillStyle = '#fff';
-                ctx.fillText(card.symbol, cx + cw / 2, cy + ch / 2 + cw * 0.18);
-            } else {
-                // Hidden
+            } else if (isFlipped) {
                 ctx.fillStyle = '#1a1a2e';
-                ctx.strokeStyle = 'rgba(255,255,255,0.1)';
-                ctx.lineWidth = 1;
-                ctx.beginPath();
-                ctx.roundRect(cx, cy, cw, ch, 8);
-                ctx.fill();
-                ctx.stroke();
+                ctx.strokeStyle = '#00f0ff';
+            } else {
+                ctx.fillStyle = '#1a1a2e';
+                ctx.strokeStyle = 'rgba(255,255,255,0.08)';
+            }
 
-                // Neural pattern on back
-                ctx.fillStyle = 'rgba(255,255,255,0.05)';
-                ctx.font = `${Math.floor(cw * 0.35)}px serif`;
+            ctx.lineWidth = isFlipped ? 2 : 1;
+            ctx.beginPath();
+            ctx.roundRect(card.x, card.y, card.w, card.h, 8);
+            ctx.fill();
+            ctx.stroke();
+
+            if (isFlipped) {
+                // Show symbol
+                const fontSize = Math.min(card.w, card.h) * 0.5;
+                ctx.font = `${fontSize}px serif`;
                 ctx.textAlign = 'center';
-                ctx.fillText('?', cx + cw / 2, cy + ch / 2 + cw * 0.12);
+                ctx.textBaseline = 'middle';
+                ctx.fillText(card.symbol, card.x + card.w / 2, card.y + card.h / 2);
+            } else {
+                // Card back pattern
+                ctx.fillStyle = 'rgba(184, 41, 221, 0.15)';
+                ctx.beginPath();
+                ctx.arc(card.x + card.w / 2, card.y + card.h / 2, card.w * 0.2, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.fillStyle = 'rgba(184, 41, 221, 0.08)';
+                ctx.beginPath();
+                ctx.arc(card.x + card.w / 2, card.y + card.h / 2, card.w * 0.35, 0, Math.PI * 2);
+                ctx.fill();
             }
         }
+        ctx.textBaseline = 'alphabetic';
 
+        // Progress bar
+        const pct = matched / totalPairs;
+        ctx.fillStyle = 'rgba(255,255,255,0.08)';
+        ctx.fillRect(0, H - 4, W, 4);
+        ctx.fillStyle = '#39ff14';
+        ctx.fillRect(0, H - 4, W * pct, 4);
+
+        particles.update();
         particles.draw();
-    }
-
-    function endGame() {
-        const elapsed = Math.floor((Date.now() - startTime) / 1000);
-        AudioSystem.win();
-
-        // Calculate memory score
-        const efficiency = totalPairs / Math.max(1, attempts); // 1.0 = perfect
-        const newMemoryScore = Math.min(100, Math.max(0, efficiency * 100));
-        memoryScore = memoryScore * 0.6 + newMemoryScore * 0.4; // Smooth
-
-        const patterns = [];
-        if (efficiency > 0.7) patterns.push('Excellent memory');
-        else if (efficiency < 0.3) patterns.push('Struggles with memory');
-
-        // Check scanning pattern
-        if (revealOrder.length > 6) {
-            let leftToRight = 0;
-            for (let i = 1; i < revealOrder.length; i++) {
-                const prev = revealOrder[i - 1] % gridCols;
-                const curr = revealOrder[i] % gridCols;
-                if (curr > prev) leftToRight++;
-            }
-            if (leftToRight / revealOrder.length > 0.5) {
-                patterns.push('Scans left-to-right');
-            }
-        }
-
-        PlayerProfile.recordGame('memoryMatch', 'win', patterns);
-        PlayerProfile.updatePatterns('memoryMatch', { memoryScore: Math.round(memoryScore), bestTime: elapsed });
-
-        setTimeout(() => showEndScreen(elapsed), 500);
-    }
-
-    function showEndScreen(elapsed) {
-        const overlay = document.getElementById('game-ui-overlay');
-        const efficiency = Math.round((totalPairs / Math.max(1, attempts)) * 100);
-        overlay.innerHTML = `
-            <div class="game-start-overlay">
-                <div class="game-overlay-msg" style="color: #39ff14">🏆 COMPLETE!</div>
-                <div style="color: var(--text-secondary); font-family: var(--font-mono); font-size: 0.9rem;">
-                    Time: ${elapsed}s | Attempts: ${attempts}<br>
-                    Efficiency: ${efficiency}% | Memory Score: ${Math.round(memoryScore)}%
-                </div>
-                <div style="color: var(--text-dim); font-family: var(--font-mono); font-size: 0.8rem;">
-                    ${memoryScore > 65 ? '⬆️ Grid may increase next game' : (memoryScore < 35 ? '⬇️ Grid may decrease next game' : 'Grid stays the same')}
-                </div>
-                <button class="start-btn" onclick="MemoryMatchGame.restart()">PLAY AGAIN</button>
-                <button class="back-btn" onclick="document.getElementById('back-btn').click()">BACK TO ARENA</button>
-            </div>
-        `;
     }
 
     function gameLoop() {
         if (!running) return;
-        update();
         draw();
         animFrame = requestAnimationFrame(gameLoop);
     }
 
     function getInsights() {
-        return [
-            { label: 'Memory Score', value: `${Math.round(memoryScore)}%`, bar: memoryScore / 100, color: '#39ff14' },
-            { label: 'Grid Size', value: `${gridCols}×${gridRows}`, color: '#b829dd' },
-            { label: 'Attempts', value: `${attempts}`, color: '#ffe600' },
-            { label: 'Matched', value: `${matchCount}/${totalPairs}`, color: '#00f0ff' }
+        const insights = [
+            { label: 'Difficulty', value: `${difficulty}/5`, color: '#b829dd' },
+            { label: 'Moves', value: `${moves}`, color: '#00f0ff' },
+            { label: 'Pairs Found', value: `${matched}/${totalPairs}`, bar: matched / Math.max(1, totalPairs), color: '#39ff14' },
         ];
+
+        if (moves > 0) {
+            const eff = Math.round(matched / moves * 100);
+            insights.push({ label: 'Efficiency', value: `${eff}%`, bar: eff / 100, color: '#ffe600' });
+        }
+
+        if (difficultyDirection !== 'stable') {
+            insights.push({
+                label: 'AI Adapting',
+                value: difficultyDirection === 'harder' ? '📈 Harder' : '📉 Easier',
+                color: '#ff006e'
+            });
+        }
+
+        // Hardest symbol
+        const hardest = Object.entries(symbolDifficulty)
+            .filter(([, v]) => v.seen > 1)
+            .sort(([, a], [, b]) => (a.recalled / a.seen) - (b.recalled / b.seen));
+        if (hardest.length > 0) {
+            insights.push({ label: 'Your Weakest', value: hardest[0][0], color: '#ff6b35' });
+        }
+
+        return insights;
     }
 
     return {
@@ -335,11 +450,11 @@ const MemoryMatchGame = (() => {
             const overlay = document.getElementById('game-ui-overlay');
             overlay.innerHTML = `
                 <div class="game-start-overlay">
-                    <div style="font-family: var(--font-display); font-size: 1.5rem; color: var(--neon-purple);">MEMORY MATCH</div>
+                    <div style="font-family: var(--font-display); font-size: 1.5rem; color: var(--neon-green);">MEMORY MATCH</div>
                     <div class="start-instruction">
-                        Click cards to reveal them. Match pairs.<br>
-                        AI tracks your memory patterns and adjusts difficulty.<br>
-                        Good memory → bigger grid. Bad memory → smaller grid.
+                        Click cards to flip them and find matching pairs.<br>
+                        The AI tracks which symbols and positions you struggle with,<br>
+                        and adapts difficulty each round.
                     </div>
                     <button class="start-btn" id="mm-start">START</button>
                 </div>
@@ -348,7 +463,6 @@ const MemoryMatchGame = (() => {
                 overlay.innerHTML = '';
                 running = true;
                 AudioSystem.init();
-                startTime = Date.now();
                 gameLoop();
             };
 
@@ -358,14 +472,7 @@ const MemoryMatchGame = (() => {
                 const scaleY = H / rect.height;
                 const mx = (e.clientX - rect.left) * scaleX;
                 const my = (e.clientY - rect.top) * scaleY;
-
-                for (const card of grid) {
-                    if (mx >= card.x && mx <= card.x + cellSize &&
-                        my >= card.y && my <= card.y + cellSize) {
-                        selectCard(card.idx);
-                        return;
-                    }
-                }
+                handleClick(mx, my);
             };
         },
         stop() {
@@ -377,31 +484,18 @@ const MemoryMatchGame = (() => {
             running = false;
             cancelAnimationFrame(animFrame);
             document.getElementById('game-ui-overlay').innerHTML = '';
-            init(canvas);
+            // Keep difficulty and learned data, just reset round
+            resetRound();
             canvas.width = W;
             canvas.height = H;
             running = true;
-            startTime = Date.now();
-            canvas.onclick = (e) => {
-                const rect = canvas.getBoundingClientRect();
-                const scaleX = W / rect.width;
-                const scaleY = H / rect.height;
-                const mx = (e.clientX - rect.left) * scaleX;
-                const my = (e.clientY - rect.top) * scaleY;
-                for (const card of grid) {
-                    if (mx >= card.x && mx <= card.x + cellSize &&
-                        my >= card.y && my <= card.y + cellSize) {
-                        selectCard(card.idx);
-                        return;
-                    }
-                }
-            };
             gameLoop();
         },
         getInsights,
         getStatsBar() {
-            return `<span><span class="stat-label">MATCHED</span> <span class="stat-value">${matchCount}/${totalPairs}</span></span>
-                    <span><span class="stat-label">ATTEMPTS</span> <span class="stat-value">${attempts}</span></span>`;
+            return `<span><span class="stat-label">DIFF</span> <span class="stat-value">${difficulty}/5</span></span>
+                    <span><span class="stat-label">MOVES</span> <span class="stat-value">${moves}</span></span>
+                    <span><span class="stat-label">PAIRS</span> <span class="stat-value">${matched}/${totalPairs}</span></span>`;
         }
     };
 })();
